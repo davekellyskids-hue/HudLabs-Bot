@@ -6,10 +6,24 @@ import { sanitizeMarkdown } from '../../utils/validation.js';
 
 import { InteractionHelper } from '../../utils/interactionHelper.js';
 import { replyUserError, ErrorTypes } from '../../utils/errorHandler.js';
+
+// Attachment safety limits (kept local so only this file needs to change)
+const MAX_ATTACHMENT_SIZE_BYTES = 25 * 1024 * 1024; // 25 MB
+const BLOCKED_ATTACHMENT_EXTENSIONS = new Set([
+    'exe', 'msi', 'bat', 'cmd', 'com', 'scr', 'pif', 'vbs', 'vbe',
+    'js', 'jse', 'wsf', 'wsh', 'ps1', 'ps1xml', 'psc1', 'msh', 'msh1', 'msh2',
+    'jar', 'apk', 'app', 'deb', 'rpm', 'sh', 'bash', 'run', 'dll', 'sys', 'gadget'
+]);
+
+function getFileExtension(filename = '') {
+    const match = /\.([a-zA-Z0-9]+)$/.exec(filename);
+    return match ? match[1].toLowerCase() : '';
+}
+
 export default {
     data: new SlashCommandBuilder()
         .setName("dm")
-        .setDescription("Send a direct message to a user (Staff only)")
+        .setDescription("Send a direct message (and optional file) to a user (Staff only)")
         .addUserOption(option =>
             option
                 .setName("user")
@@ -19,8 +33,14 @@ export default {
         .addStringOption(option =>
             option
                 .setName("message")
-                .setDescription("The message to send")
-                .setRequired(true)
+                .setDescription("The message to send (optional if a file is attached)")
+                .setRequired(false)
+        )
+        .addAttachmentOption(option =>
+            option
+                .setName("file")
+                .setDescription("A file to attach to the DM (optional)")
+                .setRequired(false)
         )
         .addBooleanOption(option =>
             option
@@ -43,13 +63,17 @@ export default {
             return;
         }
 
-    const targetUser = interaction.options.getUser("user");
+        const targetUser = interaction.options.getUser("user");
         const message = interaction.options.getString("message");
+        const attachment = interaction.options.getAttachment("file");
         const anonymous = interaction.options.getBoolean("anonymous") || false;
 
         try {
-            
-            if (message.length > 2000) {
+            if (!message && !attachment) {
+                return await replyUserError(interaction, { type: ErrorTypes.UNKNOWN, message: 'Provide a message, a file, or both.' });
+            }
+
+            if (message && message.length > 2000) {
                 return await replyUserError(interaction, { type: ErrorTypes.UNKNOWN, message: 'Messages must be under 2000 characters.' });
             }
 
@@ -57,19 +81,40 @@ export default {
                 return await replyUserError(interaction, { type: ErrorTypes.UNKNOWN, message: 'You cannot send DMs to bot accounts.' });
             }
 
-            const sanitized = sanitizeMarkdown(message);
+            let files;
+            if (attachment) {
+                if (attachment.size > MAX_ATTACHMENT_SIZE_BYTES) {
+                    return await replyUserError(interaction, {
+                        type: ErrorTypes.UNKNOWN,
+                        message: `That file is too large to relay (limit: ${Math.floor(MAX_ATTACHMENT_SIZE_BYTES / (1024 * 1024))} MB).`
+                    });
+                }
+
+                const extension = getFileExtension(attachment.name);
+                if (BLOCKED_ATTACHMENT_EXTENSIONS.has(extension)) {
+                    return await replyUserError(interaction, {
+                        type: ErrorTypes.UNKNOWN,
+                        message: `Files with the ".${extension}" extension can't be sent through this command for safety reasons.`
+                    });
+                }
+
+                files = [{ attachment: attachment.url, name: attachment.name }];
+            }
+
+            const sanitized = message ? sanitizeMarkdown(message) : null;
 
             const dmChannel = await targetUser.createDM();
-            
+
+            const dmEmbed = successEmbed(
+                anonymous ? "Message from the Staff Team" : `Message from ${interaction.user.tag}`,
+                sanitized || (attachment ? `Sent you a file: **${attachment.name}**` : '')
+            ).setFooter({
+                text: `You cannot reply to this message. | Logger ID: ${interaction.id}`
+            });
+
             await dmChannel.send({
-                embeds: [
-                    successEmbed(
-                        anonymous ? "Message from the Staff Team" : `Message from ${interaction.user.tag}`,
-                        sanitized
-                    ).setFooter({
-                        text: `You cannot reply to this message. | Logger ID: ${interaction.id}`
-                    })
-                ]
+                embeds: [dmEmbed],
+                ...(files ? { files } : {})
             });
 
             await logEvent({
@@ -79,12 +124,14 @@ export default {
                     action: "DM Sent",
                     target: `${targetUser.tag} (${targetUser.id})`,
                     executor: `${interaction.user.tag} (${interaction.user.id})`,
-                    reason: `Anonymous: ${anonymous ? 'Yes' : 'No'}`,
+                    reason: `Anonymous: ${anonymous ? 'Yes' : 'No'}${attachment ? ` | Attachment: ${attachment.name}` : ''}`,
                     metadata: {
                         userId: targetUser.id,
                         moderatorId: interaction.user.id,
                         anonymous,
-                        messageLength: sanitized.length
+                        messageLength: sanitized ? sanitized.length : 0,
+                        attachmentName: attachment?.name || null,
+                        attachmentSize: attachment?.size || null
                     }
                 }
             });
@@ -93,17 +140,17 @@ export default {
                 embeds: [
                     successEmbed(
                         "DM Sent",
-                        `Successfully sent a message to ${targetUser.tag}`
+                        `Successfully sent ${attachment ? 'a message and file' : 'a message'} to ${targetUser.tag}`
                     ),
                 ],
             });
         } catch (error) {
             logger.error('DM command error:', error);
-            
-if (error.code === 50007) {
+
+            if (error.code === 50007) {
                 return await replyUserError(interaction, { type: ErrorTypes.UNKNOWN, message: `Could not send a DM to ${targetUser.tag}. They may have DMs disabled.` });
             }
-            
+
             return await replyUserError(interaction, { type: ErrorTypes.UNKNOWN, message: `Failed to send DM: ${error.message}` });
         }
     }
