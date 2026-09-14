@@ -1,4 +1,10 @@
-import { SlashCommandBuilder } from 'discord.js';
+import {
+    SlashCommandBuilder,
+    EmbedBuilder,
+    ActionRowBuilder,
+    ButtonBuilder,
+    ButtonStyle,
+} from 'discord.js';
 import { randomBytes } from 'node:crypto';
 
 const REVIEW_REQUEST_TTL = 7 * 24 * 60 * 60;
@@ -61,6 +67,11 @@ export default {
         const subcommand =
             interaction.options.getSubcommand();
 
+        // Acknowledge the interaction immediately. DB writes + a DM send
+        // can easily take longer than Discord's 3s ack window, which was
+        // causing interaction.reply() to fail with "Unknown interaction".
+        await interaction.deferReply({ ephemeral: true });
+
         if (subcommand === 'request') {
             const customer =
                 interaction.options.getUser('user');
@@ -77,30 +88,30 @@ export default {
             const token =
                 randomBytes(12).toString('hex');
 
-            await client.db.set(
-                requestKey(token),
-                {
-                    token,
-                    guildId: interaction.guildId,
-                    userId: customer.id,
-                    product,
-                    price,
-                    order,
-                    requestedBy: interaction.user.id,
-                    createdAt:
-                        new Date().toISOString(),
-                },
-                REVIEW_REQUEST_TTL
-            );
+            try {
+                await client.db.set(
+                    requestKey(token),
+                    {
+                        token,
+                        guildId: interaction.guildId,
+                        userId: customer.id,
+                        product,
+                        price,
+                        order,
+                        requestedBy: interaction.user.id,
+                        createdAt:
+                            new Date().toISOString(),
+                    },
+                    REVIEW_REQUEST_TTL
+                );
+            } catch (error) {
+                return interaction.editReply({
+                    content:
+                        '❌ Something went wrong saving the review request. Please try again.',
+                });
+            }
 
             try {
-                const {
-                    EmbedBuilder,
-                    ActionRowBuilder,
-                    ButtonBuilder,
-                    ButtonStyle,
-                } = await import('discord.js');
-
                 const embed =
                     new EmbedBuilder()
                         .setColor(0xf2c94c)
@@ -178,20 +189,16 @@ export default {
                     .delete(requestKey(token))
                     .catch(() => {});
 
-                return interaction.reply({
+                return interaction.editReply({
                     content:
                         `❌ I couldn't DM ${customer}. ` +
                         `They may have their DMs disabled or blocked the bot.`,
-
-                    ephemeral: true,
                 });
             }
 
-            return interaction.reply({
+            return interaction.editReply({
                 content:
                     `✅ Review request privately sent to ${customer}.`,
-
-                ephemeral: true,
             });
         }
 
@@ -201,16 +208,22 @@ export default {
 
         if (subcommand === 'stats') {
 
-            const reviews =
-                await client.db.get(
-                    `temp:hudlabs_reviews:${interaction.guildId}`,
-                    []
-                );
+            let list = [];
 
-            const list =
-                Array.isArray(reviews)
-                    ? reviews
-                    : [];
+            try {
+                const reviews =
+                    await client.db.get(
+                        `temp:hudlabs_reviews:${interaction.guildId}`,
+                        []
+                    );
+
+                list = Array.isArray(reviews) ? reviews : [];
+            } catch (error) {
+                return interaction.editReply({
+                    content:
+                        '❌ Something went wrong fetching review stats. Please try again.',
+                });
+            }
 
             const average =
                 list.length
@@ -226,12 +239,10 @@ export default {
                     ).toFixed(1)
                     : '0.0';
 
-            return interaction.reply({
+            return interaction.editReply({
                 content:
                     `⭐ HudLabs rating: **${average}/5.0** ` +
                     `from **${list.length}** review${list.length === 1 ? '' : 's'}.`,
-
-                ephemeral: true,
             });
         }
     },
