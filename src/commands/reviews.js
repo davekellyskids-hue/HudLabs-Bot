@@ -1,240 +1,97 @@
 import {
-    SlashCommandBuilder,
-    EmbedBuilder,
-    ActionRowBuilder,
-    ButtonBuilder,
-    ButtonStyle,
+    ModalBuilder,
+    LabelBuilder,
+    RadioGroupBuilder,
+    RadioGroupOptionBuilder,
+    TextInputBuilder,
+    TextInputStyle,
 } from 'discord.js';
-import { randomBytes } from 'node:crypto';
+import { InteractionHelper } from '../../utils/interactionHelper.js';
+import { logger } from '../../utils/logger.js';
+import { requestKey } from '../../commands/reviews.js';
 
-const REVIEW_REQUEST_TTL = 7 * 24 * 60 * 60;
-const REVIEW_REQUEST_PREFIX = 'temp:hudlabs_review_request:';
+const hudlabsReviewButton = {
+    // This MUST match the part of the customId before the first ':'.
+    // The button was created with `hudlabs_review:${token}`, so this
+    // handler's name has to be exactly 'hudlabs_review'.
+    name: 'hudlabs_review',
 
-function requestKey(token) {
-    return `${REVIEW_REQUEST_PREFIX}${token}`;
-}
+    async execute(interaction, client, args) {
+        const [token] = args;
 
-export default {
-    slashOnly: true,
-
-    data: new SlashCommandBuilder()
-        .setName('review')
-        .setDescription('HudLabs customer reviews')
-
-        .addSubcommand(subcommand =>
-            subcommand
-                .setName('request')
-                .setDescription('Privately DM a customer for a review')
-
-                .addUserOption(option =>
-                    option
-                        .setName('user')
-                        .setDescription('The customer')
-                        .setRequired(true)
-                )
-
-                .addStringOption(option =>
-                    option
-                        .setName('product')
-                        .setDescription('Product / asset pack name')
-                        .setRequired(true)
-                )
-
-                .addStringOption(option =>
-                    option
-                        .setName('price')
-                        .setDescription('Price paid, e.g. 3,500 R$')
-                        .setRequired(true)
-                )
-
-                .addStringOption(option =>
-                    option
-                        .setName('order')
-                        .setDescription('Order ID')
-                        .setRequired(true)
-                )
-        )
-
-        .addSubcommand(subcommand =>
-            subcommand
-                .setName('stats')
-                .setDescription('Show HudLabs review statistics')
-        ),
-
-    category: 'Community',
-
-    async execute(interaction, guildConfig, client) {
-        const subcommand =
-            interaction.options.getSubcommand();
-
-        await interaction.deferReply({ ephemeral: true });
-
-        if (subcommand === 'request') {
-            const customer =
-                interaction.options.getUser('user');
-
-            const product =
-                interaction.options.getString('product');
-
-            const price =
-                interaction.options.getString('price');
-
-            const order =
-                interaction.options.getString('order');
-
-            const token =
-                randomBytes(12).toString('hex');
-
-            try {
-                await client.db.set(
-                    requestKey(token),
-                    {
-                        token,
-                        guildId: interaction.guildId,
-                        userId: customer.id,
-                        product,
-                        price,
-                        order,
-                        requestedBy: interaction.user.id,
-                        createdAt:
-                            new Date().toISOString(),
-                    },
-                    REVIEW_REQUEST_TTL
-                );
-            } catch (error) {
-                return interaction.editReply({
-                    content:
-                        '❌ Something went wrong saving the review request. Please try again.',
-                });
-            }
-
-            try {
-                const embed =
-                    new EmbedBuilder()
-                        .setColor(0xf2c94c)
-
-                        .setAuthor({
-                            name:
-                                `${customer.globalName || customer.username} (@${customer.username})`,
-                        })
-
-                        .setDescription([
-                            `${customer}`,
-                            '',
-                            '💚 **Verified Purchase**',
-                            '',
-                            '│ No written review left.',
-                        ].join('\n'))
-
-                        .addFields(
-                            {
-                                name: 'Pack',
-                                value: product,
-                                inline: true,
-                            },
-                            {
-                                name: 'Paid',
-                                value: price,
-                                inline: true,
-                            },
-                            {
-                                name: 'Order',
-                                value: order,
-                                inline: true,
-                            },
-                        )
-
-                        .setFooter({
-                            text:
-                                'HudLabs • No written review left',
-                        });
-
-                const row =
-                    new ActionRowBuilder()
-                        .addComponents(
-                            new ButtonBuilder()
-                                .setCustomId(
-                                    `hudlabs_review:${token}`
-                                )
-                                .setLabel(
-                                    'Leave a Review'
-                                )
-                                .setEmoji('⭐')
-                                .setStyle(
-                                    ButtonStyle.Primary
-                                )
-                        );
-
-                await customer.send({
-                    content:
-                        `Hey ${customer}! 👋\n\n` +
-                        `Thank you for purchasing from **HudLabs**! ` +
-                        `We'd really appreciate it if you could take a moment to leave us a review. ⭐`,
-
-                    embeds: [embed],
-
-                    components: [row],
-                });
-
-            } catch (error) {
-
-                await client.db
-                    .delete(requestKey(token))
-                    .catch(() => {});
-
-                return interaction.editReply({
-                    content:
-                        `❌ I couldn't DM ${customer}. ` +
-                        `They may have their DMs disabled or blocked the bot.`,
-                });
-            }
-
-            return interaction.editReply({
-                content:
-                    `✅ Review request privately sent to ${customer}.`,
+        if (!token) {
+            await InteractionHelper.safeReply(interaction, {
+                content: '❌ This review link is malformed.',
+                ephemeral: true,
             });
+            return;
         }
 
-        if (subcommand === 'stats') {
+        let requestData;
+        try {
+            requestData = await client.db.get(requestKey(token), null);
+        } catch (error) {
+            logger.error('hudlabsReview: failed to load review request', {
+                token,
+                error: error.message,
+            });
+            await InteractionHelper.safeReply(interaction, {
+                content: '❌ Something went wrong loading this review request.',
+                ephemeral: true,
+            });
+            return;
+        }
 
-            let list = [];
+        if (!requestData) {
+            await InteractionHelper.safeReply(interaction, {
+                content: '❌ This review request has expired or was already used.',
+                ephemeral: true,
+            });
+            return;
+        }
 
-            try {
-                const reviews =
-                    await client.db.get(
-                        `temp:hudlabs_reviews:${interaction.guildId}`,
-                        []
-                    );
+        const modal = new ModalBuilder()
+            .setCustomId(`hudlabs_review_modal:${token}`)
+            .setTitle('Leave a Review');
 
-                list = Array.isArray(reviews) ? reviews : [];
-            } catch (error) {
-                return interaction.editReply({
-                    content:
-                        '❌ Something went wrong fetching review stats. Please try again.',
-                });
-            }
+        const ratingRadioGroup = new RadioGroupBuilder()
+            .setCustomId('rating')
+            .setRequired(true)
+            .addOptions(
+                new RadioGroupOptionBuilder().setLabel('⭐☆☆☆☆  1 - Poor').setValue('1'),
+                new RadioGroupOptionBuilder().setLabel('⭐⭐☆☆☆  2 - Below Average').setValue('2'),
+                new RadioGroupOptionBuilder().setLabel('⭐⭐⭐☆☆  3 - Average').setValue('3'),
+                new RadioGroupOptionBuilder().setLabel('⭐⭐⭐⭐☆  4 - Good').setValue('4'),
+                new RadioGroupOptionBuilder()
+                    .setLabel('⭐⭐⭐⭐⭐  5 - Excellent')
+                    .setValue('5')
+                    .setDefault(true),
+            );
 
-            const average =
-                list.length
-                    ? (
-                        list.reduce(
-                            (sum, review) =>
-                                sum +
-                                Number(
-                                    review.rating || 0
-                                ),
-                            0
-                        ) / list.length
-                    ).toFixed(1)
-                    : '0.0';
+        const ratingLabel = new LabelBuilder()
+            .setLabel('Your rating')
+            .setRadioGroupComponent(ratingRadioGroup);
 
-            return interaction.editReply({
-                content:
-                    `⭐ HudLabs rating: **${average}/5.0** ` +
-                    `from **${list.length}** review${list.length === 1 ? '' : 's'}.`,
+        const reviewInput = new TextInputBuilder()
+            .setCustomId('review_text')
+            .setStyle(TextInputStyle.Paragraph)
+            .setMaxLength(1000)
+            .setRequired(false);
+
+        const reviewLabel = new LabelBuilder()
+            .setLabel('Your review (optional)')
+            .setTextInputComponent(reviewInput);
+
+        modal.addComponents(ratingLabel, reviewLabel);
+
+        const shown = await InteractionHelper.safeShowModal(interaction, modal);
+        if (!shown) {
+            await InteractionHelper.safeReply(interaction, {
+                content: '❌ Could not open the review form. Please try clicking the button again.',
+                ephemeral: true,
             });
         }
     },
 };
 
-export { requestKey };
+export default hudlabsReviewButton;
