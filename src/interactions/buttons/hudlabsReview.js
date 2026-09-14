@@ -1,6 +1,8 @@
 import {
     ModalBuilder,
-    ActionRowBuilder,
+    LabelBuilder,
+    RadioGroupBuilder,
+    RadioGroupOptionBuilder,
     TextInputBuilder,
     TextInputStyle,
 } from 'discord.js';
@@ -52,25 +54,35 @@ const hudlabsReviewButton = {
             .setCustomId(`hudlabs_review_modal:${token}`)
             .setTitle('Leave a Review');
 
-        const ratingInput = new TextInputBuilder()
+        const ratingRadioGroup = new RadioGroupBuilder()
             .setCustomId('rating')
-            .setLabel('Rating (1-5)')
-            .setStyle(TextInputStyle.Short)
-            .setMinLength(1)
-            .setMaxLength(1)
-            .setRequired(true);
+            .setRequired(true)
+            .addOptions(
+                new RadioGroupOptionBuilder().setLabel('⭐☆☆☆☆  1 - Poor').setValue('1'),
+                new RadioGroupOptionBuilder().setLabel('⭐⭐☆☆☆  2 - Below Average').setValue('2'),
+                new RadioGroupOptionBuilder().setLabel('⭐⭐⭐☆☆  3 - Average').setValue('3'),
+                new RadioGroupOptionBuilder().setLabel('⭐⭐⭐⭐☆  4 - Good').setValue('4'),
+                new RadioGroupOptionBuilder()
+                    .setLabel('⭐⭐⭐⭐⭐  5 - Excellent')
+                    .setValue('5')
+                    .setDefault(true),
+            );
+
+        const ratingLabel = new LabelBuilder()
+            .setLabel('Your rating')
+            .setRadioGroupComponent(ratingRadioGroup);
 
         const reviewInput = new TextInputBuilder()
             .setCustomId('review_text')
-            .setLabel('Your review')
             .setStyle(TextInputStyle.Paragraph)
             .setMaxLength(1000)
             .setRequired(false);
 
-        modal.addComponents(
-            new ActionRowBuilder().addComponents(ratingInput),
-            new ActionRowBuilder().addComponents(reviewInput),
-        );
+        const reviewLabel = new LabelBuilder()
+            .setLabel('Your review (optional)')
+            .setTextInputComponent(reviewInput);
+
+        modal.addComponents(ratingLabel, reviewLabel);
 
         const shown = await InteractionHelper.safeShowModal(interaction, modal);
         if (!shown) {
