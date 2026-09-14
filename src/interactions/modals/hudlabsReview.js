@@ -45,7 +45,7 @@ const hudlabsReviewModal = {
             return;
         }
 
-        const rawRating = interaction.fields.getTextInputValue('rating')?.trim();
+        const rawRating = interaction.fields.getRadioGroup('rating', true);
         const rating = Number(rawRating);
         const reviewText = interaction.fields.getTextInputValue('review_text')?.trim() || '';
 
