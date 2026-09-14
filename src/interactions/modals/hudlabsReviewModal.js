@@ -90,8 +90,7 @@ const hudlabsReviewModal = {
         // Explicit unicode escapes (not literal emoji glyphs) so the star
         // characters can't get corrupted by copy/paste into GitHub's editor.
         const FILLED_STAR = '\u2B50'; // ⭐
-        const EMPTY_STAR = '\u2606'; // ☆
-        const stars = FILLED_STAR.repeat(rating) + EMPTY_STAR.repeat(5 - rating);
+        const stars = FILLED_STAR.repeat(rating);
 
         // Color scales from red (1 star) to green (5 stars).
         const RATING_COLORS = {
