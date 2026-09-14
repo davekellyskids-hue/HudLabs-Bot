@@ -7,8 +7,7 @@ const REVIEWS_KEY_PREFIX = 'temp:hudlabs_reviews:';
 const REVIEWS_CHANNEL_ID = '1531866115146514586';
 
 const hudlabsReviewModal = {
-    // Must match the customId prefix set on the modal:
-    // `hudlabs_review_modal:${token}`
+    // Must match customId prefix: `hudlabs_review_modal:${token}`
     name: 'hudlabs_review_modal',
 
     async execute(interaction, client, args) {
@@ -45,13 +44,37 @@ const hudlabsReviewModal = {
             return;
         }
 
-        const rawRating = interaction.fields.getRadioGroup('rating', true);
-        const rating = Number(rawRating);
-        const reviewText = interaction.fields.getTextInputValue('review_text')?.trim() || '';
+        // --- SAFE FIELD EXTRACTION ---
+        let rawRating = '';
+        let reviewText = '';
+
+        try {
+            // Check if radio group custom field exists; fall back to standard text field
+            if (typeof interaction.fields.getRadioGroup === 'function') {
+                rawRating = interaction.fields.getRadioGroup('rating', false) || '';
+            }
+            if (!rawRating) {
+                rawRating = interaction.fields.getTextInputValue('rating') || '';
+            }
+            reviewText = interaction.fields.getTextInputValue('review_text')?.trim() || '';
+        } catch (fieldErr) {
+            logger.error('hudlabsReviewModal: error reading modal fields', { error: fieldErr.message });
+        }
+
+        // Clean rating input (extracts numbers or counts star emojis)
+        let rating = parseInt(rawRating.replace(/[^0-9]/g, ''), 10);
+
+        if (isNaN(rating) || rating < 1 || rating > 5) {
+            // Fallback check if user submitted star emojis directly
+            const starMatches = (rawRating.match(/⭐|\u2B50/g) || []).length;
+            if (starMatches >= 1 && starMatches <= 5) {
+                rating = starMatches;
+            }
+        }
 
         if (!Number.isInteger(rating) || rating < 1 || rating > 5) {
             await InteractionHelper.safeEditReply(interaction, {
-                content: '❌ Please enter a rating between 1 and 5.',
+                content: '❌ Please enter a valid rating between 1 and 5.',
             });
             return;
         }
@@ -87,12 +110,9 @@ const hudlabsReviewModal = {
             return;
         }
 
-        // Explicit unicode escapes (not literal emoji glyphs) so the star
-        // characters can't get corrupted by copy/paste into GitHub's editor.
         const FILLED_STAR = '\u2B50'; // ⭐
         const stars = FILLED_STAR.repeat(rating);
 
-        // Color scales from red (1 star) to green (5 stars).
         const RATING_COLORS = {
             1: 0xED4245,
             2: 0xF1704B,
@@ -106,11 +126,8 @@ const hudlabsReviewModal = {
             client.guilds.fetch(requestData.guildId).catch(() => null),
         ]);
 
-        // Build ONE fresh embed from scratch (rather than cloning the original
-        // request embed, which already had Pack/Paid/Order fields baked in —
-        // reusing it and then adding those fields again was causing duplicates).
         const reviewEmbed = new EmbedBuilder()
-            .setColor(RATING_COLORS[rating])
+            .setColor(RATING_COLORS[rating] || 0x57F287)
             .setAuthor({
                 name: reviewer
                     ? `${reviewer.globalName || reviewer.username} (@${reviewer.username})`
@@ -143,8 +160,6 @@ const hudlabsReviewModal = {
                 components: [],
             });
         } catch (error) {
-            // Non-fatal: the review is saved even if we can't edit the DM message
-            // (e.g. it's too old, or was deleted).
             logger.warn('hudlabsReviewModal: failed to update DM embed', {
                 token,
                 error: error.message,
@@ -162,8 +177,6 @@ const hudlabsReviewModal = {
                 });
             }
         } catch (error) {
-            // Non-fatal: the review is still saved to the DB even if posting fails
-            // (e.g. missing permissions, wrong channel ID, channel deleted).
             logger.warn('hudlabsReviewModal: failed to post review to reviews channel', {
                 channelId: REVIEWS_CHANNEL_ID,
                 token,
