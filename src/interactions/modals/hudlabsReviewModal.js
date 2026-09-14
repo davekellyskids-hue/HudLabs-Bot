@@ -121,7 +121,7 @@ const hudlabsReviewModal = {
             .setTitle('New Review')
             .setThumbnail(reviewer?.displayAvatarURL?.({ size: 256 }) ?? null)
             .setDescription([
-                `### ${stars}`,
+                stars,
                 '',
                 '🛡️ **Verified Purchase**',
                 '',
