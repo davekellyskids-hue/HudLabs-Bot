@@ -4,6 +4,7 @@ import { logger } from '../../utils/logger.js';
 import { requestKey } from '../../commands/reviews.js';
 
 const REVIEWS_KEY_PREFIX = 'temp:hudlabs_reviews:';
+const REVIEWS_CHANNEL_ID = '1531866115146514586';
 
 const hudlabsReviewModal = {
     // Must match the customId prefix set on the modal:
@@ -86,10 +87,10 @@ const hudlabsReviewModal = {
             return;
         }
 
-        try {
-            const stars = '⭐'.repeat(rating) + '☆'.repeat(5 - rating);
+        const stars = '⭐'.repeat(rating) + '☆'.repeat(5 - rating);
 
-            const updatedEmbed = EmbedBuilder.from(interaction.message.embeds[0] || {})
+        const buildReviewEmbed = (baseEmbed) =>
+            EmbedBuilder.from(baseEmbed || {})
                 .setDescription([
                     `<@${requestData.userId}>`,
                     '',
@@ -100,6 +101,9 @@ const hudlabsReviewModal = {
                 ].join('\n'))
                 .setFooter({ text: 'HudLabs • Review submitted' });
 
+        try {
+            const updatedEmbed = buildReviewEmbed(interaction.message.embeds[0]);
+
             await interaction.message.edit({
                 embeds: [updatedEmbed],
                 components: [],
@@ -108,6 +112,33 @@ const hudlabsReviewModal = {
             // Non-fatal: the review is saved even if we can't edit the DM message
             // (e.g. it's too old, or was deleted).
             logger.warn('hudlabsReviewModal: failed to update DM embed', {
+                token,
+                error: error.message,
+            });
+        }
+
+        try {
+            const reviewsChannel = await client.channels.fetch(REVIEWS_CHANNEL_ID);
+
+            if (reviewsChannel?.isTextBased?.()) {
+                const channelEmbed = buildReviewEmbed(interaction.message.embeds[0])
+                    .addFields(
+                        { name: 'Pack', value: requestData.product || 'N/A', inline: true },
+                        { name: 'Paid', value: requestData.price || 'N/A', inline: true },
+                        { name: 'Order', value: requestData.order || 'N/A', inline: true },
+                    );
+
+                await reviewsChannel.send({ embeds: [channelEmbed] });
+            } else {
+                logger.warn('hudlabsReviewModal: reviews channel is not text-based or was not found', {
+                    channelId: REVIEWS_CHANNEL_ID,
+                });
+            }
+        } catch (error) {
+            // Non-fatal: the review is still saved to the DB even if posting fails
+            // (e.g. missing permissions, wrong channel ID, channel deleted).
+            logger.warn('hudlabsReviewModal: failed to post review to reviews channel', {
+                channelId: REVIEWS_CHANNEL_ID,
                 token,
                 error: error.message,
             });
