@@ -6,6 +6,10 @@ import { requestKey } from '../../commands/reviews.js';
 const REVIEWS_KEY_PREFIX = 'temp:hudlabs_reviews:';
 const REVIEWS_CHANNEL_ID = '1531866115146514586';
 
+// REPLACE THIS WITH YOUR CUSTOM STAR EMOJI STRING OR ID:
+// Example format: '<:star:123456789012345678>'
+const CUSTOM_STAR_EMOJI = '<:star:123456789012345678>';
+
 const hudlabsReviewModal = {
     // Must match customId prefix: `hudlabs_review_modal:${token}`
     name: 'hudlabs_review_modal',
@@ -44,12 +48,10 @@ const hudlabsReviewModal = {
             return;
         }
 
-        // --- SAFE FIELD EXTRACTION ---
         let rawRating = '';
         let reviewText = '';
 
         try {
-            // Check if radio group custom field exists; fall back to standard text field
             if (typeof interaction.fields.getRadioGroup === 'function') {
                 rawRating = interaction.fields.getRadioGroup('rating', false) || '';
             }
@@ -61,11 +63,9 @@ const hudlabsReviewModal = {
             logger.error('hudlabsReviewModal: error reading modal fields', { error: fieldErr.message });
         }
 
-        // Clean rating input (extracts numbers or counts star emojis)
         let rating = parseInt(rawRating.replace(/[^0-9]/g, ''), 10);
 
         if (isNaN(rating) || rating < 1 || rating > 5) {
-            // Fallback check if user submitted star emojis directly
             const starMatches = (rawRating.match(/⭐|\u2B50/g) || []).length;
             if (starMatches >= 1 && starMatches <= 5) {
                 rating = starMatches;
@@ -110,8 +110,8 @@ const hudlabsReviewModal = {
             return;
         }
 
-        const FILLED_STAR = '\u2B50'; // ⭐
-        const stars = FILLED_STAR.repeat(rating);
+        // Creates custom star emojis (e.g. 5 stars = 5 custom star icons)
+        const stars = CUSTOM_STAR_EMOJI.repeat(rating);
 
         const RATING_COLORS = {
             1: 0xED4245,
