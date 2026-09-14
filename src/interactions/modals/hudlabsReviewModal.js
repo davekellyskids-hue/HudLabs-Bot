@@ -113,21 +113,13 @@ const hudlabsReviewModal = {
         // Creates custom star emojis (e.g. 5 stars = 5 custom star icons)
         const stars = CUSTOM_STAR_EMOJI.repeat(rating);
 
-        const RATING_COLORS = {
-            1: 0xED4245,
-            2: 0xF1704B,
-            3: 0xFEE75C,
-            4: 0xA3E635,
-            5: 0x57F287,
-        };
-
         const [reviewer, guild] = await Promise.all([
             client.users.fetch(requestData.userId).catch(() => null),
             client.guilds.fetch(requestData.guildId).catch(() => null),
         ]);
 
         const reviewEmbed = new EmbedBuilder()
-            .setColor(RATING_COLORS[rating] || 0x57F287)
+            .setColor(0x8A2BE2) // Purple accent bar
             .setAuthor({
                 name: reviewer
                     ? `${reviewer.globalName || reviewer.username} (@${reviewer.username})`
