@@ -9,11 +9,15 @@ import {
     TextInputStyle,
 } from 'discord.js';
 
-const REVIEW_DB_KEY = (guildId) => `hudlabs:reviews:${guildId}`;
+const MEMBER_REVIEWS_CHANNEL_ID = '1531866115146514586';
 
-/**
- * Get all HudLabs reviews
- */
+const REVIEW_DB_KEY = (guildId) =>
+    `hudlabs:reviews:${guildId}`;
+
+/* ==========================================
+   DATABASE
+   ========================================== */
+
 async function getReviews(client, guildId) {
     try {
         const data = await client.db.get(
@@ -23,14 +27,15 @@ async function getReviews(client, guildId) {
 
         return Array.isArray(data) ? data : [];
     } catch (error) {
-        console.error('Failed to get HudLabs reviews:', error);
+        console.error(
+            '[HudLabs Reviews] Failed to load reviews:',
+            error
+        );
+
         return [];
     }
 }
 
-/**
- * Save HudLabs reviews
- */
 async function saveReviews(client, guildId, reviews) {
     await client.db.set(
         REVIEW_DB_KEY(guildId),
@@ -38,9 +43,10 @@ async function saveReviews(client, guildId, reviews) {
     );
 }
 
-/**
- * Calculate store rating
- */
+/* ==========================================
+   RATING
+   ========================================== */
+
 function getRating(reviews) {
     if (!reviews.length) {
         return '0.0';
@@ -55,22 +61,25 @@ function getRating(reviews) {
     return (total / reviews.length).toFixed(1);
 }
 
-/**
- * Create star display
- */
-function stars(rating) {
+function getStars(rating) {
     const number = Math.max(
         0,
-        Math.min(5, Math.round(Number(rating) || 0))
+        Math.min(
+            5,
+            Math.round(Number(rating) || 0)
+        )
     );
 
-    return '⭐'.repeat(number) +
-        '☆'.repeat(5 - number);
+    return (
+        '⭐'.repeat(number) +
+        '☆'.repeat(5 - number)
+    );
 }
 
-/**
- * Create the HudLabs review card
- */
+/* ==========================================
+   REVIEW EMBED
+   ========================================== */
+
 function buildReviewEmbed({
     user,
     product,
@@ -78,24 +87,32 @@ function buildReviewEmbed({
     order,
     rating,
     reviewCount,
-    writtenReview,
+    comment,
 }) {
-    const hasReview = Boolean(writtenReview);
-
     const displayName =
         user.globalName || user.username;
 
-    const embed = new EmbedBuilder()
+    const hasComment =
+        Boolean(comment && comment.trim());
+
+    return new EmbedBuilder()
         .setColor(0xf2c94c)
 
-        // Arthur (@ArthurDevelops)
+        /*
+         * Example:
+         *
+         * Arthur (@ArthurDevelops)
+         */
         .setAuthor({
-            name: `${displayName} (@${user.username})`,
+            name:
+                `${displayName} (@${user.username})`,
         })
 
+        /*
+         * Actual Discord mention
+         */
         .setDescription(
             [
-                // Actual clickable Discord mention
                 `${user}`,
 
                 '',
@@ -104,8 +121,8 @@ function buildReviewEmbed({
 
                 '',
 
-                hasReview
-                    ? `> ${writtenReview}`
+                hasComment
+                    ? `> ${comment}`
                     : '│ No written review left.',
             ].join('\n')
         )
@@ -113,64 +130,72 @@ function buildReviewEmbed({
         .addFields(
             {
                 name: 'Pack',
-                value: product || 'Asset Pack',
+                value:
+                    product || 'Asset Pack',
                 inline: true,
             },
 
             {
                 name: 'Paid',
-                value: price || 'Paid',
+                value:
+                    price || 'Paid',
                 inline: true,
             },
 
             {
                 name: 'Order',
-                value: order || 'N/A',
+                value:
+                    order || 'N/A',
                 inline: false,
             },
 
             {
                 name: 'Store rating',
                 value:
-                    `${stars(rating)} ${rating} from ${reviewCount} review${reviewCount === 1 ? '' : 's'}`,
+                    `${getStars(rating)} ${rating} from ${reviewCount} review${reviewCount === 1 ? '' : 's'}`,
                 inline: false,
             }
         )
 
         .setFooter({
             text:
-                `HudLabs • ${hasReview ? '✓' : 'No written review left'} • ` +
+                `HudLabs • ✓ Verified Purchase • ` +
                 new Date().toLocaleTimeString([], {
                     hour: '2-digit',
                     minute: '2-digit',
                 }),
         });
-
-    return embed;
 }
+
+/* ==========================================
+   COMMAND
+   ========================================== */
 
 export default {
     slashOnly: true,
 
     data: new SlashCommandBuilder()
         .setName('review')
-        .setDescription('HudLabs customer reviews')
+        .setDescription(
+            'HudLabs customer reviews'
+        )
 
-        /*
-         * /review request
-         */
+        /* ================================
+           /review request
+           ================================ */
+
         .addSubcommand(subcommand =>
             subcommand
                 .setName('request')
                 .setDescription(
-                    'Send a HudLabs review request'
+                    'Privately DM a customer for a review'
                 )
 
                 .addUserOption(option =>
                     option
                         .setName('user')
                         .setDescription(
-                            'The customer who purchased the product'
+                            'The customer'
                         )
                         .setRequired(true)
                 )
@@ -179,7 +204,7 @@ export default {
                     option
                         .setName('product')
                         .setDescription(
-                            'Product / asset pack name'
+                            'Product / asset pack'
                         )
                         .setRequired(true)
                 )
@@ -203,9 +228,10 @@ export default {
                 )
         )
 
-        /*
-         * /review stats
-         */
+        /* ================================
+           /review stats
+           ================================ */
+
         .addSubcommand(subcommand =>
             subcommand
                 .setName('stats')
@@ -221,25 +247,31 @@ export default {
         const subcommand =
             interaction.options.getSubcommand();
 
-        /*
-         * ==========================================
-         * /review request
-         * ==========================================
-         */
+        /* ==========================================
+           /review request
+           ========================================== */
 
         if (subcommand === 'request') {
 
             const customer =
-                interaction.options.getUser('user');
+                interaction.options.getUser(
+                    'user'
+                );
 
             const product =
-                interaction.options.getString('product');
+                interaction.options.getString(
+                    'product'
+                );
 
             const price =
-                interaction.options.getString('price');
+                interaction.options.getString(
+                    'price'
+                );
 
             const order =
-                interaction.options.getString('order');
+                interaction.options.getString(
+                    'order'
+                );
 
             const reviews =
                 await getReviews(
@@ -248,21 +280,24 @@ export default {
                 );
 
             /*
-             * Check whether this customer
-             * already reviewed this order.
+             * Check if this order already
+             * has a review.
              */
 
             const existingReview =
-                reviews.find(review =>
-                    review.userId === customer.id &&
-                    review.order === order
+                reviews.find(
+                    review =>
+                        review.userId ===
+                            customer.id &&
+                        review.order ===
+                            order
                 );
 
             const rating =
                 getRating(reviews);
 
             /*
-             * Create the card
+             * Build initial review card.
              */
 
             const embed =
@@ -272,19 +307,20 @@ export default {
                     price,
                     order,
                     rating,
-                    reviewCount: reviews.length,
-                    writtenReview:
+                    reviewCount:
+                        reviews.length,
+                    comment:
                         existingReview?.comment,
                 });
 
             /*
-             * Review button
+             * Button inside DM.
              */
 
             const button =
                 new ButtonBuilder()
                     .setCustomId(
-                        `hudlabs_write_review:${customer.id}:${order}`
+                        `hudlabs_review:${interaction.guildId}:${customer.id}:${order}`
                     )
                     .setLabel(
                         existingReview
@@ -302,361 +338,59 @@ export default {
                 new ActionRowBuilder()
                     .addComponents(button);
 
-            /*
-             * Send review card
-             */
+            /* ==========================================
+               SEND PRIVATE DM
+               ========================================== */
 
-            await interaction.reply({
-                content: `${customer}`,
-                embeds: [embed],
-                components: [row],
-            });
+            try {
 
-            const message =
-                await interaction.fetchReply();
+                await customer.send({
 
-            /*
-             * Button collector
-             */
+                    content:
+                        `Hey ${customer}! 👋\n\n` +
+                        `Thank you for purchasing from **HudLabs**!\n` +
+                        `We'd really appreciate it if you could take a moment to leave us a review. ⭐`,
 
-            const collector =
-                message.createMessageComponentCollector({
-                    time: 24 * 60 * 60 * 1000,
+                    embeds: [
+                        embed
+                    ],
+
+                    components: [
+                        row
+                    ],
                 });
 
-            collector.on(
-                'collect',
-                async buttonInteraction => {
+            } catch (error) {
 
-                    const parts =
-                        buttonInteraction.customId
-                            .split(':');
+                console.error(
+                    '[HudLabs Reviews] Could not DM user:',
+                    error
+                );
 
-                    const customerId =
-                        parts[1];
+                return interaction.reply({
+                    content:
+                        `❌ I couldn't DM ${customer}.\n` +
+                        `They may have their DMs disabled.`,
 
-                    const orderId =
-                        parts.slice(2).join(':');
+                    ephemeral: true,
+                });
+            }
 
-                    /*
-                     * Make sure the correct customer
-                     * is clicking the button.
-                     */
+            /*
+             * Only staff sees this.
+             */
 
-                    if (
-                        buttonInteraction.user.id !==
-                        customerId
-                    ) {
-                        return buttonInteraction.reply({
-                            content:
-                                '❌ This review request belongs to another customer.',
-                            ephemeral: true,
-                        });
-                    }
+            return interaction.reply({
+                content:
+                    `✅ Review request privately sent to ${customer}.`,
 
-                    /*
-                     * Create review modal
-                     */
-
-                    const modal =
-                        new ModalBuilder()
-                            .setCustomId(
-                                `hudlabs_review_modal:${customerId}:${orderId}`
-                            )
-                            .setTitle(
-                                'HudLabs Review'
-                            );
-
-                    /*
-                     * Rating input
-                     */
-
-                    const ratingInput =
-                        new TextInputBuilder()
-                            .setCustomId('rating')
-                            .setLabel(
-                                'Rating (1-5)'
-                            )
-                            .setPlaceholder(
-                                '5'
-                            )
-                            .setStyle(
-                                TextInputStyle.Short
-                            )
-                            .setRequired(true)
-                            .setMaxLength(1);
-
-                    /*
-                     * Comment input
-                     */
-
-                    const commentInput =
-                        new TextInputBuilder()
-                            .setCustomId(
-                                'comment'
-                            )
-                            .setLabel(
-                                'Your review'
-                            )
-                            .setPlaceholder(
-                                'Tell us what you thought about your purchase...'
-                            )
-                            .setStyle(
-                                TextInputStyle.Paragraph
-                            )
-                            .setRequired(true)
-                            .setMaxLength(1000);
-
-                    modal.addComponents(
-
-                        new ActionRowBuilder()
-                            .addComponents(
-                                ratingInput
-                            ),
-
-                        new ActionRowBuilder()
-                            .addComponents(
-                                commentInput
-                            )
-                    );
-
-                    await buttonInteraction.showModal(
-                        modal
-                    );
-
-                    try {
-
-                        const submitted =
-                            await buttonInteraction
-                                .awaitModalSubmit({
-                                    time:
-                                        5 * 60 * 1000,
-
-                                    filter: i =>
-                                        i.user.id ===
-                                            customerId &&
-                                        i.customId ===
-                                            `hudlabs_review_modal:${customerId}:${orderId}`,
-                                });
-
-                        /*
-                         * Get rating
-                         */
-
-                        const ratingNumber =
-                            Number(
-                                submitted.fields.getTextInputValue(
-                                    'rating'
-                                )
-                            );
-
-                        /*
-                         * Get comment
-                         */
-
-                        const comment =
-                            submitted.fields
-                                .getTextInputValue(
-                                    'comment'
-                                )
-                                .trim();
-
-                        /*
-                         * Validate rating
-                         */
-
-                        if (
-                            !Number.isInteger(
-                                ratingNumber
-                            ) ||
-                            ratingNumber < 1 ||
-                            ratingNumber > 5
-                        ) {
-
-                            return submitted.reply({
-                                content:
-                                    '❌ Your rating must be between 1 and 5.',
-                                ephemeral: true,
-                            });
-                        }
-
-                        /*
-                         * Load latest reviews
-                         */
-
-                        const currentReviews =
-                            await getReviews(
-                                interaction.client,
-                                interaction.guildId
-                            );
-
-                        /*
-                         * Check for existing review
-                         */
-
-                        const existingIndex =
-                            currentReviews.findIndex(
-                                review =>
-                                    review.userId ===
-                                        customerId &&
-                                    review.order ===
-                                        orderId
-                            );
-
-                        /*
-                         * Create review
-                         */
-
-                        const reviewData = {
-                            userId:
-                                customerId,
-
-                            username:
-                                customer.username,
-
-                            product:
-                                product,
-
-                            price:
-                                price,
-
-                            order:
-                                orderId,
-
-                            rating:
-                                ratingNumber,
-
-                            comment:
-                                comment,
-
-                            createdAt:
-                                new Date()
-                                    .toISOString(),
-                        };
-
-                        /*
-                         * Update existing review
-                         * or create a new one.
-                         */
-
-                        if (
-                            existingIndex >= 0
-                        ) {
-
-                            currentReviews[
-                                existingIndex
-                            ] = reviewData;
-
-                        } else {
-
-                            currentReviews.push(
-                                reviewData
-                            );
-                        }
-
-                        /*
-                         * Save reviews
-                         */
-
-                        await saveReviews(
-                            interaction.client,
-                            interaction.guildId,
-                            currentReviews
-                        );
-
-                        /*
-                         * Calculate new store rating
-                         */
-
-                        const newRating =
-                            getRating(
-                                currentReviews
-                            );
-
-                        /*
-                         * Build updated card
-                         */
-
-                        const updatedEmbed =
-                            buildReviewEmbed({
-                                user: customer,
-                                product,
-                                price,
-                                order: orderId,
-                                rating:
-                                    newRating,
-                                reviewCount:
-                                    currentReviews.length,
-                                writtenReview:
-                                    comment,
-                            });
-
-                        /*
-                         * Change button to Edit Review
-                         */
-
-                        const updatedButton =
-                            new ButtonBuilder()
-                                .setCustomId(
-                                    `hudlabs_write_review:${customerId}:${orderId}`
-                                )
-                                .setLabel(
-                                    'Edit Review'
-                                )
-                                .setEmoji('⭐')
-                                .setStyle(
-                                    ButtonStyle.Secondary
-                                );
-
-                        /*
-                         * Update the original
-                         * Discord review card.
-                         */
-
-                        await interaction.editReply({
-                            embeds: [
-                                updatedEmbed,
-                            ],
-
-                            components: [
-                                new ActionRowBuilder()
-                                    .addComponents(
-                                        updatedButton
-                                    ),
-                            ],
-                        });
-
-                        /*
-                         * Confirmation
-                         */
-
-                        await submitted.reply({
-                            content:
-                                '✅ Thanks! Your HudLabs review has been saved.',
-                            ephemeral: true,
-                        });
-
-                    } catch (error) {
-
-                        /*
-                         * Modal timed out.
-                         */
-
-                        console.log(
-                            'HudLabs review modal timed out.'
-                        );
-                    }
-                }
-            );
-
-            return;
+                ephemeral: true,
+            });
         }
 
-        /*
-         * ==========================================
-         * /review stats
-         * ==========================================
-         */
+        /* ==========================================
+           /review stats
+           ========================================== */
 
         if (subcommand === 'stats') {
 
@@ -672,17 +406,423 @@ export default {
             const embed =
                 new EmbedBuilder()
                     .setColor(0xf2c94c)
+
                     .setTitle(
                         '⭐ HudLabs Store Reviews'
                     )
+
                     .setDescription(
-                        `${stars(rating)} **${rating}/5.0**\n\n` +
-                        `Based on **${reviews.length}** review${reviews.length === 1 ? '' : 's'}.`
+                        [
+                            `${getStars(rating)} **${rating}/5.0**`,
+                            '',
+                            `Based on **${reviews.length}** review${reviews.length === 1 ? '' : 's'}.`,
+                        ].join('\n')
                     );
 
             return interaction.reply({
-                embeds: [embed],
+                embeds: [
+                    embed
+                ],
+
+                ephemeral: true,
             });
         }
+    },
+
+    /* ==========================================
+       BUTTON HANDLER
+       ========================================== */
+
+    async handleButton(interaction) {
+
+        if (
+            !interaction.customId.startsWith(
+                'hudlabs_review:'
+            )
+        ) {
+            return;
+        }
+
+        const parts =
+            interaction.customId.split(':');
+
+        const guildId =
+            parts[1];
+
+        const customerId =
+            parts[2];
+
+        const order =
+            parts.slice(3).join(':');
+
+        /*
+         * Only the customer can review.
+         */
+
+        if (
+            interaction.user.id !==
+            customerId
+        ) {
+            return interaction.reply({
+                content:
+                    '❌ This review request belongs to another customer.',
+
+                ephemeral: true,
+            });
+        }
+
+        /*
+         * Create modal.
+         */
+
+        const modal =
+            new ModalBuilder()
+                .setCustomId(
+                    `hudlabs_review_modal:${guildId}:${customerId}:${order}`
+                )
+                .setTitle(
+                    'HudLabs Review'
+                );
+
+        const ratingInput =
+            new TextInputBuilder()
+                .setCustomId(
+                    'rating'
+                )
+                .setLabel(
+                    'Rating (1-5)'
+                )
+                .setPlaceholder(
+                    '5'
+                )
+                .setStyle(
+                    TextInputStyle.Short
+                )
+                .setRequired(true)
+                .setMaxLength(1);
+
+        const commentInput =
+            new TextInputBuilder()
+                .setCustomId(
+                    'comment'
+                )
+                .setLabel(
+                    'Your review'
+                )
+                .setPlaceholder(
+                    'Tell us what you thought about your purchase...'
+                )
+                .setStyle(
+                    TextInputStyle.Paragraph
+                )
+                .setRequired(true)
+                .setMaxLength(1000);
+
+        modal.addComponents(
+
+            new ActionRowBuilder()
+                .addComponents(
+                    ratingInput
+                ),
+
+            new ActionRowBuilder()
+                .addComponents(
+                    commentInput
+                )
+        );
+
+        await interaction.showModal(
+            modal
+        );
+    },
+
+    /* ==========================================
+       MODAL HANDLER
+       ========================================== */
+
+    async handleModal(interaction) {
+
+        if (
+            !interaction.customId.startsWith(
+                'hudlabs_review_modal:'
+            )
+        ) {
+            return;
+        }
+
+        const parts =
+            interaction.customId.split(':');
+
+        const guildId =
+            parts[1];
+
+        const customerId =
+            parts[2];
+
+        const order =
+            parts.slice(3).join(':');
+
+        /*
+         * Make sure correct customer submits.
+         */
+
+        if (
+            interaction.user.id !==
+            customerId
+        ) {
+            return interaction.reply({
+                content:
+                    '❌ You cannot submit this review.',
+
+                ephemeral: true,
+            });
+        }
+
+        /*
+         * Get rating.
+         */
+
+        const rating =
+            Number(
+                interaction.fields.getTextInputValue(
+                    'rating'
+                )
+            );
+
+        /*
+         * Get written review.
+         */
+
+        const comment =
+            interaction.fields
+                .getTextInputValue(
+                    'comment'
+                )
+                .trim();
+
+        /*
+         * Validate rating.
+         */
+
+        if (
+            !Number.isInteger(rating) ||
+            rating < 1 ||
+            rating > 5
+        ) {
+            return interaction.reply({
+                content:
+                    '❌ Please enter a rating from 1 to 5.',
+
+                ephemeral: true,
+            });
+        }
+
+        if (!comment) {
+            return interaction.reply({
+                content:
+                    '❌ Please write a review.',
+
+                ephemeral: true,
+            });
+        }
+
+        /*
+         * Get current reviews.
+         */
+
+        const reviews =
+            await getReviews(
+                interaction.client,
+                guildId
+            );
+
+        /*
+         * Check if this order already
+         * has a review.
+         */
+
+        const existingIndex =
+            reviews.findIndex(
+                review =>
+                    review.userId ===
+                        customerId &&
+                    review.order ===
+                        order
+            );
+
+        /*
+         * Create review.
+         */
+
+        const review = {
+            userId:
+                customerId,
+
+            username:
+                interaction.user.username,
+
+            product:
+                existingIndex >= 0
+                    ? reviews[existingIndex].product
+                    : 'Asset Pack',
+
+            price:
+                existingIndex >= 0
+                    ? reviews[existingIndex].price
+                    : 'Paid',
+
+            order:
+                order,
+
+            rating:
+                rating,
+
+            comment:
+                comment,
+
+            createdAt:
+                new Date().toISOString(),
+        };
+
+        /*
+         * Update existing review
+         * or create a new review.
+         */
+
+        if (existingIndex >= 0) {
+
+            reviews[
+                existingIndex
+            ] = {
+                ...reviews[existingIndex],
+                ...review,
+            };
+
+        } else {
+
+            reviews.push(
+                review
+            );
+        }
+
+        /*
+         * Save database.
+         */
+
+        await saveReviews(
+            interaction.client,
+            guildId,
+            reviews
+        );
+
+        /*
+         * Get updated rating.
+         */
+
+        const newRating =
+            getRating(reviews);
+
+        /*
+         * Get member reviews channel.
+         */
+
+        const channel =
+            await interaction.client.channels.fetch(
+                MEMBER_REVIEWS_CHANNEL_ID
+            );
+
+        if (!channel) {
+            return interaction.reply({
+                content:
+                    '❌ The member reviews channel could not be found.',
+
+                ephemeral: true,
+            });
+        }
+
+        /*
+         * Make sure channel can receive messages.
+         */
+
+        if (
+            !channel.isTextBased()
+        ) {
+            return interaction.reply({
+                content:
+                    '❌ The member reviews channel is not a text channel.',
+
+                ephemeral: true,
+            });
+        }
+
+        /*
+         * Build PUBLIC review card.
+         */
+
+        const publicEmbed =
+            buildReviewEmbed({
+                user:
+                    interaction.user,
+
+                product:
+                    review.product,
+
+                price:
+                    review.price,
+
+                order:
+                    review.order,
+
+                rating:
+                    newRating,
+
+                reviewCount:
+                    reviews.length,
+
+                comment:
+                    review.comment,
+            });
+
+        /*
+         * Post review in:
+         *
+         * 1531866115146514586
+         */
+
+        try {
+
+            await channel.send({
+                embeds: [
+                    publicEmbed
+                ],
+            });
+
+        } catch (error) {
+
+            console.error(
+                '[HudLabs Reviews] Failed to post review:',
+                error
+            );
+
+            return interaction.reply({
+                content:
+                    '❌ Your review was saved, but I could not post it in the member reviews channel.',
+
+                ephemeral: true,
+            });
+        }
+
+        /*
+         * Tell customer their review
+         * was successfully submitted.
+         */
+
+        return interaction.reply({
+            content:
+                '✅ **Review submitted!**\n\n' +
+                'Thank you for supporting **HudLabs**! ⭐',
+
+            ephemeral: true,
+        });
     },
 };
