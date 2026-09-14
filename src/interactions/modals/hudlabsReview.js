@@ -87,25 +87,60 @@ const hudlabsReviewModal = {
             return;
         }
 
-        const stars = '⭐'.repeat(rating) + '☆'.repeat(5 - rating);
+        // Explicit unicode escapes (not literal emoji glyphs) so the star
+        // characters can't get corrupted by copy/paste into GitHub's editor.
+        const FILLED_STAR = '\u2B50'; // ⭐
+        const EMPTY_STAR = '\u2606'; // ☆
+        const stars = FILLED_STAR.repeat(rating) + EMPTY_STAR.repeat(5 - rating);
 
-        const buildReviewEmbed = (baseEmbed) =>
-            EmbedBuilder.from(baseEmbed || {})
-                .setDescription([
-                    `<@${requestData.userId}>`,
-                    '',
-                    '💚 **Verified Purchase**',
-                    '',
-                    `${stars} (${rating}/5)`,
-                    reviewText ? `\n${reviewText}` : '',
-                ].join('\n'))
-                .setFooter({ text: 'HudLabs • Review submitted' });
+        // Color scales from red (1 star) to green (5 stars).
+        const RATING_COLORS = {
+            1: 0xED4245,
+            2: 0xF1704B,
+            3: 0xFEE75C,
+            4: 0xA3E635,
+            5: 0x57F287,
+        };
+
+        const [reviewer, guild] = await Promise.all([
+            client.users.fetch(requestData.userId).catch(() => null),
+            client.guilds.fetch(requestData.guildId).catch(() => null),
+        ]);
+
+        // Build ONE fresh embed from scratch (rather than cloning the original
+        // request embed, which already had Pack/Paid/Order fields baked in —
+        // reusing it and then adding those fields again was causing duplicates).
+        const reviewEmbed = new EmbedBuilder()
+            .setColor(RATING_COLORS[rating])
+            .setAuthor({
+                name: reviewer
+                    ? `${reviewer.globalName || reviewer.username} (@${reviewer.username})`
+                    : `User ${requestData.userId}`,
+                iconURL: reviewer?.displayAvatarURL?.() ?? undefined,
+            })
+            .setTitle('New Review')
+            .setThumbnail(reviewer?.displayAvatarURL?.({ size: 256 }) ?? null)
+            .setDescription([
+                `### ${stars}`,
+                '',
+                '🛡️ **Verified Purchase**',
+                '',
+                reviewText ? `> ${reviewText.replace(/\n/g, '\n> ')}` : '*No written review left.*',
+            ].join('\n'))
+            .addFields(
+                { name: '📦  Pack', value: requestData.product || 'N/A', inline: true },
+                { name: '💵  Paid', value: requestData.price || 'N/A', inline: true },
+                { name: '🧾  Order', value: requestData.order || 'N/A', inline: true },
+            )
+            .setFooter({
+                text: 'HudLabs • Verified Purchase',
+                iconURL: guild?.iconURL?.() ?? undefined,
+            })
+            .setTimestamp();
 
         try {
-            const updatedEmbed = buildReviewEmbed(interaction.message.embeds[0]);
-
             await interaction.message.edit({
-                embeds: [updatedEmbed],
+                embeds: [reviewEmbed],
                 components: [],
             });
         } catch (error) {
@@ -121,14 +156,7 @@ const hudlabsReviewModal = {
             const reviewsChannel = await client.channels.fetch(REVIEWS_CHANNEL_ID);
 
             if (reviewsChannel?.isTextBased?.()) {
-                const channelEmbed = buildReviewEmbed(interaction.message.embeds[0])
-                    .addFields(
-                        { name: 'Pack', value: requestData.product || 'N/A', inline: true },
-                        { name: 'Paid', value: requestData.price || 'N/A', inline: true },
-                        { name: 'Order', value: requestData.order || 'N/A', inline: true },
-                    );
-
-                await reviewsChannel.send({ embeds: [channelEmbed] });
+                await reviewsChannel.send({ embeds: [reviewEmbed] });
             } else {
                 logger.warn('hudlabsReviewModal: reviews channel is not text-based or was not found', {
                     channelId: REVIEWS_CHANNEL_ID,
