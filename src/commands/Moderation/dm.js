@@ -22,8 +22,8 @@ const RECIPIENT_OPTION_NAMES = ['user', 'user2', 'user3', 'user4', 'user5'];
 // Roles allowed to run /dm (in addition to anyone with Moderate Members).
 // ADD NEW STAFF ROLE IDS HERE (right-click role > Copy Role ID, needs Developer Mode).
 const STAFF_ROLE_IDS = [
-    'ROLE_ID_1',
-    'ROLE_ID_2',
+    '1531933955161460867',
+    '1550229956204699731',
 ];
 
 // Delay between DMs so we don't hammer the rate limit
